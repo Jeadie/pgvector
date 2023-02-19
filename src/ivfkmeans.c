@@ -5,6 +5,9 @@
 #include "ivfflat.h"
 #include "miscadmin.h"
 
+
+// Jeadie: K-means. Needed for IVF index structure.
+
 /*
  * Initialize with kmeans++
  *

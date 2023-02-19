@@ -4,6 +4,8 @@
 #include "storage/bufmgr.h"
 #include "vector.h"
 
+ // Jeadie: Both vector and IVF index helper funcs.
+
 /*
  * Allocate a vector array
  */

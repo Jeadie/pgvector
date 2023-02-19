@@ -6,6 +6,8 @@
 #include "storage/bufmgr.h"
 #include "utils/memutils.h"
 
+// Jeadie: Insert operations into IVF page
+
 /*
  * Find the list that minimizes the distance function
  */

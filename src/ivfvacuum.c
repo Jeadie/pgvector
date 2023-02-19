@@ -4,6 +4,8 @@
 #include "ivfflat.h"
 #include "storage/bufmgr.h"
 
+// jeadie: Bulk delete operation. Not essential.
+
 /*
  * Bulk delete tuples from the index
  */

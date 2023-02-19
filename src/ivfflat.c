@@ -8,6 +8,8 @@
 #include "utils/guc.h"
 #include "utils/selfuncs.h"
 
+// Jeadie: Implement Postgresql index handler, cost estimates, and index init/close operations
+
 #if PG_VERSION_NUM >= 120000
 #include "commands/progress.h"
 #endif

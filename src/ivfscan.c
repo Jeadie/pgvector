@@ -10,6 +10,8 @@
 #include "catalog/pg_operator_d.h"
 #include "catalog/pg_type_d.h"
 
+// jeadie: Methods for scan-related index handlers
+
 /*
  * Compare list distances
  */
