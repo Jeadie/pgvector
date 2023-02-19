@@ -77,59 +77,39 @@ hnswhandler(PG_FUNCTION_ARGS)
     /* type of data stored in index, or InvalidOid if variable */
     amroutine->amkeytype = InvalidOid; 
 
-    /* Functions: https://www.postgresql.org/docs/current/index-functions.html */ 
+
+    /**
+     *  Functions
+     *    https://www.postgresql.org/docs/current/index-functions.html 
+    */ 
+    /**
+     * Create & Delete Index 
+    */
     /* "Build new index" function */
-    amroutine->ambuild = ivfflatbuild;
+    amroutine->ambuild = hnswbuild;
     
     /* "Build empty index" function */
-	amroutine->ambuildempty = ivfflatbuildempty;
-    
-    /* "Insert this tuple" function */
-	amroutine->aminsert = ivfflatinsert;
+	amroutine->ambuildempty = hnswbuildempty;
     
     /* Bulk-delete function */
-	amroutine->ambulkdelete = ivfflatbulkdelete;
+	amroutine->ambulkdelete = hnswbulkdelete;
     
     /* Post-VACUUM cleanup function */
-	amroutine->amvacuumcleanup = ivfflatvacuumcleanup;
-    
-    /**
-     * If the access method does not support index-only scans at all, the amcanreturn field in its
-     * IndexAmRoutine struct can be set to NULL.
-    */
-	amroutine->amcanreturn = NULL;
-
-    /* Function to estimate cost of an index scan */
-	amroutine->amcostestimate = ivfflatcostestimate;
-    
-    /* Function to parse and validate reloptions for an index */
-	amroutine->amoptions = ivfflatoptions;
-    
-    /**
-     * The amproperty method allows index access methods to override the default behavior of 
-     * pg_index_column_has_property and related functions. If the access method does not have
-     * any special behavior for index property inquiries, the amproperty field in its
-     * IndexAmRoutine struct can be set to NULL. 
-    **/
-	amroutine->amproperty = NULL; /* TODO AMPROP_DISTANCE_ORDERABLE */
+	amroutine->amvacuumcleanup = hnswvacuumcleanup;
 #if PG_VERSION_NUM >= 120000
     /* Return the textual name of the given build phase number. */
-	amroutine->ambuildphasename = ivfflatbuildphasename;
+	amroutine->ambuildphasename = hnswbuildphasename;
     
 #endif
+
+
+    /* "Insert this tuple" function */
+	amroutine->aminsert = hnswinsert;
+
+
     /**
-     * Validate the catalog entries for the specified operator class, so far as the access method 
-     * can reasonably do that. For example, this might include testing that all required support
-     * functions are provided. The amvalidate function must return false if the opclass is
-     * invalid. Problems should be reported with ereport messages, typically at INFO level.
+     * Scan Operations
     */
-	amroutine->amvalidate = ivfflatvalidate;
-    
-#if PG_VERSION_NUM >= 140000
-    // TODO
-	amroutine->amadjustmembers = NULL;
-    
-#endif
     /* "Prepare for index scan" function */
 	amroutine->ambeginscan = ivfflatbeginscan;
     
@@ -150,13 +130,49 @@ hnswhandler(PG_FUNCTION_ARGS)
     
     /* "Restore marked scan position" function*/
 	amroutine->amrestrpos = NULL;
-    
 
-    /* Interface functions to support parallel index scans */
-	amroutine->amestimateparallelscan = NULL;
+    /* Function to estimate cost of an index scan */
+	amroutine->amcostestimate = ivfflatcostestimate;
+    
+    /**
+     * Parallel index scans
+    */
+    amroutine->amestimateparallelscan = NULL;
 	amroutine->aminitparallelscan = NULL;
 	amroutine->amparallelrescan = NULL;
     
+    /**
+     * Extras
+    */
+    /**
+     * If the access method does not support index-only scans at all, the amcanreturn field in its
+     * IndexAmRoutine struct can be set to NULL.
+    */
+	amroutine->amcanreturn = NULL;
+
+    /* Function to parse and validate reloptions for an index */
+	amroutine->amoptions = ivfflatoptions;
+    
+    /**
+     * The amproperty method allows index access methods to override the default behavior of 
+     * pg_index_column_has_property and related functions. If the access method does not have
+     * any special behavior for index property inquiries, the amproperty field in its
+     * IndexAmRoutine struct can be set to NULL. 
+    **/
+	amroutine->amproperty = NULL; /* TODO AMPROP_DISTANCE_ORDERABLE */
+    /**
+     * Validate the catalog entries for the specified operator class, so far as the access method 
+     * can reasonably do that. For example, this might include testing that all required support
+     * functions are provided. The amvalidate function must return false if the opclass is
+     * invalid. Problems should be reported with ereport messages, typically at INFO level.
+    */
+	amroutine->amvalidate = ivfflatvalidate;
+    
+#if PG_VERSION_NUM >= 140000
+    // TODO
+	amroutine->amadjustmembers = NULL;
+    
+#endif
 
 	PG_RETURN_POINTER(amroutine);
     
