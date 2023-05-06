@@ -5,6 +5,7 @@
 #include "access/relscan.h"
 #include "ivfflat.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "storage/bufmgr.h"
 
 #include "catalog/pg_operator_d.h"
@@ -112,6 +113,7 @@ GetScanItems(IndexScanDesc scan, Datum value)
 	Datum		datum;
 	bool		isnull;
 	TupleDesc	tupdesc = RelationGetDescr(scan->indexRelation);
+	double		tuples = 0;
 
 #if PG_VERSION_NUM >= 120000
 	TupleTableSlot *slot = MakeSingleTupleTableSlot(so->tupdesc, &TTSOpsVirtual);
@@ -160,6 +162,8 @@ GetScanItems(IndexScanDesc scan, Datum value)
 				ExecStoreVirtualTuple(slot);
 
 				tuplesort_puttupleslot(so->sortstate, slot);
+
+				tuples++;
 			}
 
 			searchPage = IvfflatPageGetOpaque(page)->nextblkno;
@@ -167,6 +171,13 @@ GetScanItems(IndexScanDesc scan, Datum value)
 			UnlockReleaseBuffer(buf);
 		}
 	}
+
+	/* TODO Scan more lists */
+	if (tuples < 100)
+		ereport(DEBUG1,
+				(errmsg("index scan found few tuples"),
+				 errdetail("index may have been created without data or lists is too high"),
+				 errhint("recreate the index and possibly decrease lists")));
 
 	tuplesort_performsort(so->sortstate);
 }
@@ -268,6 +279,9 @@ ivfflatgettuple(IndexScanDesc scan, ScanDirection dir)
 	if (so->first)
 	{
 		Datum		value;
+
+		/* Count index scan for stats */
+		pgstat_count_index_scan(scan->indexRelation);
 
 		/* Safety check */
 		if (scan->orderByData == NULL)

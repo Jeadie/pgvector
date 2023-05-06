@@ -2,13 +2,11 @@
 
 Open-source vector similarity search for Postgres
 
-```sql
-CREATE TABLE items (embedding vector(3));
-CREATE INDEX ON items USING ivfflat (embedding vector_l2_ops);
-SELECT * FROM items ORDER BY embedding <-> '[1,2,3]' LIMIT 5;
-```
+Supports
 
-Supports L2 distance, inner product, and cosine distance
+- exact and approximate nearest neighbor search
+- L2 distance, inner product, and cosine distance
+- any [language](#languages) with a Postgres client
 
 [![Build Status](https://github.com/pgvector/pgvector/workflows/build/badge.svg?branch=master)](https://github.com/pgvector/pgvector/actions)
 
@@ -17,7 +15,8 @@ Supports L2 distance, inner product, and cosine distance
 Compile and install the extension (supports Postgres 11+)
 
 ```sh
-git clone --branch v0.4.0 https://github.com/pgvector/pgvector.git
+cd /tmp
+git clone --branch v0.4.1 https://github.com/pgvector/pgvector.git
 cd pgvector
 make
 make install # may need sudo
@@ -29,81 +28,178 @@ Then load it in databases where you want to use it
 CREATE EXTENSION vector;
 ```
 
-You can also install it with [Docker](#docker), [Homebrew](#homebrew), [PGXN](#pgxn), or [conda-forge](#conda-forge)
+See the [installation notes](#installation-notes) if you run into issues
+
+You can also install it with [Docker](#docker), [Homebrew](#homebrew), [PGXN](#pgxn), [Yum](#yum), or [conda-forge](#conda-forge)
 
 ## Getting Started
 
 Create a vector column with 3 dimensions
 
 ```sql
-CREATE TABLE items (embedding vector(3));
+CREATE TABLE items (id bigserial PRIMARY KEY, embedding vector(3));
 ```
 
-Insert values
+Insert vectors
 
 ```sql
-INSERT INTO items VALUES ('[1,2,3]'), ('[4,5,6]');
+INSERT INTO items (embedding) VALUES ('[1,2,3]'), ('[4,5,6]');
 ```
 
-Get the nearest neighbor by L2 distance
+Get the nearest neighbors by L2 distance
 
 ```sql
-SELECT * FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 1;
+SELECT * FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
 ```
 
 Also supports inner product (`<#>`) and cosine distance (`<=>`)
 
 Note: `<#>` returns the negative inner product since Postgres only supports `ASC` order index scans on operators
 
+## Storing
+
+Create a new table with a vector column
+
+```sql
+CREATE TABLE items (id bigserial PRIMARY KEY, embedding vector(3));
+```
+
+Or add a vector column to an existing table
+
+```sql
+ALTER TABLE items ADD COLUMN embedding vector(3);
+```
+
+Insert vectors
+
+```sql
+INSERT INTO items (embedding) VALUES ('[1,2,3]'), ('[4,5,6]');
+```
+
+Upsert vectors
+
+```sql
+INSERT INTO items (id, embedding) VALUES (1, '[1,2,3]'), (2, '[4,5,6]')
+    ON CONFLICT (id) DO UPDATE SET embedding = EXCLUDED.embedding;
+```
+
+Update vectors
+
+```sql
+UPDATE items SET embedding = '[1,2,3]' WHERE id = 1;
+```
+
+Delete vectors
+
+```sql
+DELETE FROM items WHERE id = 1;
+```
+
+## Querying
+
+Get the nearest neighbors to a vector
+
+```sql
+SELECT * FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+```
+
+Get the nearest neighbors to a row
+
+```sql
+SELECT * FROM items WHERE id != 1 ORDER BY embedding <-> (SELECT embedding FROM items WHERE id = 1) LIMIT 5;
+```
+
+Get rows within a certain distance
+
+```sql
+SELECT * FROM items WHERE embedding <-> '[3,1,2]' < 5;
+```
+
+Note: Combine with `ORDER BY` and `LIMIT` to use an index
+
+#### Distances
+
+Get the distance
+
+```sql
+SELECT embedding <-> '[3,1,2]' AS distance FROM items;
+```
+
+For inner product, multiply by -1 (since `<#>` returns the negative inner product)
+
+```sql
+SELECT (embedding <#> '[3,1,2]') * -1 AS inner_product FROM items;
+```
+
+For cosine similarity, use 1 - cosine distance
+
+```sql
+SELECT 1 - (embedding <=> '[3,1,2]') AS cosine_similarity FROM items;
+```
+
+#### Aggregates
+
+Average vectors
+
+```sql
+SELECT AVG(embedding) FROM items;
+```
+
+Average groups of vectors
+
+```sql
+SELECT category_id, AVG(embedding) FROM items GROUP BY category_id;
+```
+
 ## Indexing
 
-Speed up queries with an approximate index. Add an index for each distance function you want to use.
+By default, pgvector performs exact nearest neighbor search, which provides perfect recall.
+
+You can add an index to use approximate nearest neighbor search, which trades some recall for performance. Unlike typical indexes, you will see different results for queries after adding an approximate index.
+
+Three keys to achieving good recall are:
+
+1. Create the index *after* the table has some data
+2. Choose an appropriate number of lists - a good place to start is `rows / 1000` for up to 1M rows and `sqrt(rows)` for over 1M rows
+3. When querying, specify an appropriate number of [probes](#query-options) (higher is better for recall, lower is better for speed) - a good place to start is `lists / 10` for up to 1M rows and `sqrt(lists)` for over 1M rows
+
+Add an index for each distance function you want to use.
 
 L2 distance
-
-```sql
-CREATE INDEX ON items USING ivfflat (embedding vector_l2_ops);
-```
-
-Inner product
-
-```sql
-CREATE INDEX ON items USING ivfflat (embedding vector_ip_ops);
-```
-
-Cosine distance
-
-```sql
-CREATE INDEX ON items USING ivfflat (embedding vector_cosine_ops);
-```
-
-Indexes should be created after the table has some data for optimal clustering. Also, unlike typical indexes which only affect performance, you may see different results for queries after adding an approximate index. Vectors with up to 2,000 dimensions can be indexed.
-
-### Index Options
-
-Specify the number of inverted lists (100 by default)
 
 ```sql
 CREATE INDEX ON items USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
 ```
 
-A [good place to start](https://github.com/facebookresearch/faiss/issues/112) is `4 * sqrt(rows)`
+Inner product
+
+```sql
+CREATE INDEX ON items USING ivfflat (embedding vector_ip_ops) WITH (lists = 100);
+```
+
+Cosine distance
+
+```sql
+CREATE INDEX ON items USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+```
+
+Vectors with up to 2,000 dimensions can be indexed.
 
 ### Query Options
 
 Specify the number of probes (1 by default)
 
 ```sql
-SET ivfflat.probes = 1;
+SET ivfflat.probes = 10;
 ```
 
-A higher value improves recall at the cost of speed.
+A higher value provides better recall at the cost of speed, and it can be set to the number of lists for exact nearest neighbor search (at which point the planner won’t use the index)
 
 Use `SET LOCAL` inside a transaction to set it for a single query
 
 ```sql
 BEGIN;
-SET LOCAL ivfflat.probes = 1;
+SET LOCAL ivfflat.probes = 10;
 SELECT ...
 COMMIT;
 ```
@@ -136,7 +232,7 @@ SELECT * FROM items WHERE category_id = 123 ORDER BY embedding <-> '[3,1,2]' LIM
 can be indexed with:
 
 ```sql
-CREATE INDEX ON items USING ivfflat (embedding vector_l2_ops) WHERE (category_id = 123);
+CREATE INDEX ON items USING ivfflat (embedding vector_l2_ops) WITH (lists = 100) WHERE (category_id = 123);
 ```
 
 To index many different values of `category_id`, consider [partitioning](https://www.postgresql.org/docs/current/ddl-partitioning.html) on `category_id`.
@@ -147,17 +243,78 @@ CREATE TABLE items (embedding vector(3), category_id int) PARTITION BY LIST(cate
 
 ## Performance
 
+Use `EXPLAIN ANALYZE` to debug performance.
+
+```sql
+EXPLAIN ANALYZE SELECT * FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+```
+
+### Exact Search
+
 To speed up queries without an index, increase `max_parallel_workers_per_gather`.
 
 ```sql
 SET max_parallel_workers_per_gather = 4;
 ```
 
+If vectors are normalized to length 1 (like [OpenAI embeddings](https://platform.openai.com/docs/guides/embeddings/which-distance-function-should-i-use)), use inner product for best performance.
+
+```sql
+SELECT * FROM items ORDER BY embedding <#> '[3,1,2]' LIMIT 5;
+```
+
+### Approximate Search
+
 To speed up queries with an index, increase the number of inverted lists (at the expense of recall).
 
 ```sql
 CREATE INDEX ON items USING ivfflat (embedding vector_l2_ops) WITH (lists = 1000);
 ```
+
+## Languages
+
+Use pgvector from any language with a Postgres client. You can even generate and store vectors in one language and query them in another.
+
+Language | Libraries / Examples
+--- | ---
+C++ | [pgvector-cpp](https://github.com/pgvector/pgvector-cpp)
+C# | [pgvector-dotnet](https://github.com/pgvector/pgvector-dotnet)
+Crystal | [pgvector-crystal](https://github.com/pgvector/pgvector-crystal)
+Elixir | [pgvector-elixir](https://github.com/pgvector/pgvector-elixir)
+Go | [pgvector-go](https://github.com/pgvector/pgvector-go)
+Haskell | [pgvector-haskell](https://github.com/pgvector/pgvector-haskell)
+Java, Scala | [pgvector-java](https://github.com/pgvector/pgvector-java)
+Julia | [pgvector-julia](https://github.com/pgvector/pgvector-julia)
+Lua | [pgvector-lua](https://github.com/pgvector/pgvector-lua)
+Node.js | [pgvector-node](https://github.com/pgvector/pgvector-node)
+Perl | [pgvector-perl](https://github.com/pgvector/pgvector-perl)
+PHP | [pgvector-php](https://github.com/pgvector/pgvector-php)
+Python | [pgvector-python](https://github.com/pgvector/pgvector-python)
+R | [pgvector-r](https://github.com/pgvector/pgvector-r)
+Ruby | [pgvector-ruby](https://github.com/pgvector/pgvector-ruby), [Neighbor](https://github.com/ankane/neighbor)
+Rust | [pgvector-rust](https://github.com/pgvector/pgvector-rust)
+Swift | [pgvector-swift](https://github.com/pgvector/pgvector-swift)
+
+## Frequently Asked Questions
+
+#### How many vectors can be stored in a single table?
+
+A non-partitioned table has a limit of 32 TB by default in Postgres. A partitioned table can have thousands of partitions of that size.
+
+#### Is replication supported?
+
+Yes, pgvector uses the write-ahead log (WAL), which allows for replication and point-in-time recovery.
+
+#### What if I want to index vectors with more than 2,000 dimensions?
+
+Two things you can try are:
+
+1. use dimensionality reduction
+2. compile Postgres with a larger block size (`./configure --with-blocksize=32`) and edit the limit in `src/ivfflat.h`
+
+#### Why am I seeing less results after adding an index?
+
+The index was likely created with too little data for the number of lists. Drop the index until the table has more data.
 
 ## Reference
 
@@ -191,35 +348,41 @@ Function | Description
 --- | ---
 avg(vector) → vector | arithmetic mean
 
-## Libraries
+## Installation Notes
 
-Language | Libraries
---- | ---
-Python | [pgvector-python](https://github.com/pgvector/pgvector-python)
-Ruby | [Neighbor](https://github.com/ankane/neighbor), [pgvector-ruby](https://github.com/pgvector/pgvector-ruby)
-Node | [pgvector-node](https://github.com/pgvector/pgvector-node)
-Go | [pgvector-go](https://github.com/pgvector/pgvector-go)
-PHP | [pgvector-php](https://github.com/pgvector/pgvector-php)
-Rust | [pgvector-rust](https://github.com/pgvector/pgvector-rust)
-C++ | [pgvector-cpp](https://github.com/pgvector/pgvector-cpp)
-Elixir | [pgvector-elixir](https://github.com/pgvector/pgvector-elixir)
+### Postgres Location
 
-## Frequently Asked Questions
+If your machine has multiple Postgres installations, specify the path to [pg_config](https://www.postgresql.org/docs/current/app-pgconfig.html) with:
 
-#### How many vectors can be stored in a single table?
+```sh
+export PG_CONFIG=/Applications/Postgres.app/Contents/Versions/latest/bin/pg_config
+```
 
-A non-partitioned table has a limit of 32 TB by default in Postgres. A partitioned table can have thousands of partitions of that size.
+Then re-run the installation instructions (run `make clean` before `make` if needed)
 
-#### Is replication supported?
+### Missing Header
 
-Yes, pgvector uses the write-ahead log (WAL), which allows for replication and point-in-time recovery.
+If compilation fails with `fatal error: postgres.h: No such file or directory`, make sure Postgres development files are installed on the server.
 
-#### What if I want to index vectors with more than 2,000 dimensions?
+For Ubuntu and Debian, use:
 
-Two things you can try are:
+```sh
+sudo apt-get install postgresql-server-dev-15
+```
 
-1. use dimensionality reduction
-2. compile Postgres with a larger block size (`./configure --with-blocksize=32`) and edit the limit in `src/ivfflat.h`
+Note: Replace `15` with your Postgres server version
+
+### Windows
+
+Support for Windows is currently experimental. Use `nmake` to build:
+
+```cmd
+set "PGROOT=C:\Program Files\PostgreSQL\15"
+git clone --branch v0.4.1 https://github.com/pgvector/pgvector.git
+cd pgvector
+nmake /F Makefile.win
+nmake /F Makefile.win install
+```
 
 ## Additional Installation Methods
 
@@ -231,12 +394,12 @@ Get the [Docker image](https://hub.docker.com/r/ankane/pgvector) with:
 docker pull ankane/pgvector
 ```
 
-This adds pgvector to the [Postgres image](https://hub.docker.com/_/postgres).
+This adds pgvector to the [Postgres image](https://hub.docker.com/_/postgres) (run it the same way).
 
-You can also build the image manually
+You can also build the image manually:
 
 ```sh
-git clone --branch v0.4.0 https://github.com/pgvector/pgvector.git
+git clone --branch v0.4.1 https://github.com/pgvector/pgvector.git
 cd pgvector
 docker build -t pgvector .
 ```
@@ -246,7 +409,7 @@ docker build -t pgvector .
 With Homebrew Postgres, you can use:
 
 ```sh
-brew install pgvector/brew/pgvector
+brew install pgvector
 ```
 
 ### PGXN
@@ -257,9 +420,21 @@ Install from the [PostgreSQL Extension Network](https://pgxn.org/dist/vector) wi
 pgxn install vector
 ```
 
+### Yum
+
+RPM packages are available from the [PostgreSQL Yum Repository](https://yum.postgresql.org/). Follow the [setup instructions](https://www.postgresql.org/download/linux/redhat/) for your distribution and run:
+
+```sh
+sudo yum install pgvector_15
+# or
+sudo dnf install pgvector_15
+```
+
+Note: Replace `15` with your Postgres server version
+
 ### conda-forge
 
-Install from [conda-forge](https://anaconda.org/conda-forge/pgvector) with:
+With Conda Postgres, install from [conda-forge](https://anaconda.org/conda-forge/pgvector) with:
 
 ```sh
 conda install -c conda-forge pgvector
@@ -273,10 +448,10 @@ pgvector is available on [these providers](https://github.com/pgvector/pgvector/
 
 To request a new extension on other providers:
 
-- Amazon RDS - follow the instructions on [this page](https://aws.amazon.com/rds/postgresql/faqs/)
 - Google Cloud SQL - vote or comment on [this page](https://issuetracker.google.com/issues/265172065)
-- DigitalOcean Managed Databases - vote or comment on [this page](https://ideas.digitalocean.com/app-framework-services/p/pgvector-extension-for-postgresql)
 - Azure Database - vote or comment on [this page](https://feedback.azure.com/d365community/idea/7b423322-6189-ed11-a81b-000d3ae49307)
+- DigitalOcean Managed Databases - vote or comment on [this page](https://ideas.digitalocean.com/app-framework-services/p/pgvector-extension-for-postgresql)
+- Heroku Postgres - vote or comment on [this page](https://github.com/heroku/roadmap/issues/156)
 
 ## Upgrading
 

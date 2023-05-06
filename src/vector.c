@@ -100,7 +100,7 @@ CheckStateArray(ArrayType *statearray, const char *caller)
 	return (float8 *) ARR_DATA_PTR(statearray);
 }
 
-#if PG_VERSION_NUM < 120000
+#if PG_VERSION_NUM < 120003
 static pg_noinline void
 float_overflow_error(void)
 {
@@ -416,7 +416,7 @@ array_to_vector(PG_FUNCTION_ARGS)
 		else if (ARR_ELEMTYPE(array) == FLOAT4OID)
 			result->x[i] = DatumGetFloat4(elemsp[i]);
 		else if (ARR_ELEMTYPE(array) == NUMERICOID)
-			result->x[i] = DatumGetFloat4(DirectFunctionCall1(numeric_float4, NumericGetDatum(elemsp[i])));
+			result->x[i] = DatumGetFloat4(DirectFunctionCall1(numeric_float4, elemsp[i]));
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_DATA_EXCEPTION),
@@ -467,6 +467,7 @@ l2_distance(PG_FUNCTION_ARGS)
 
 	CheckDims(a, b);
 
+	/* Auto-vectorized */
 	for (int i = 0; i < a->dim; i++)
 	{
 		diff = ax[i] - bx[i];
@@ -493,6 +494,7 @@ vector_l2_squared_distance(PG_FUNCTION_ARGS)
 
 	CheckDims(a, b);
 
+	/* Auto-vectorized */
 	for (int i = 0; i < a->dim; i++)
 	{
 		diff = ax[i] - bx[i];
@@ -517,6 +519,7 @@ inner_product(PG_FUNCTION_ARGS)
 
 	CheckDims(a, b);
 
+	/* Auto-vectorized */
 	for (int i = 0; i < a->dim; i++)
 		distance += ax[i] * bx[i];
 
@@ -538,6 +541,7 @@ vector_negative_inner_product(PG_FUNCTION_ARGS)
 
 	CheckDims(a, b);
 
+	/* Auto-vectorized */
 	for (int i = 0; i < a->dim; i++)
 		distance += ax[i] * bx[i];
 
@@ -561,6 +565,7 @@ cosine_distance(PG_FUNCTION_ARGS)
 
 	CheckDims(a, b);
 
+	/* Auto-vectorized */
 	for (int i = 0; i < a->dim; i++)
 	{
 		distance += ax[i] * bx[i];
@@ -568,7 +573,8 @@ cosine_distance(PG_FUNCTION_ARGS)
 		normb += bx[i] * bx[i];
 	}
 
-	PG_RETURN_FLOAT8(1 - (distance / (sqrt(norma) * sqrt(normb))));
+	/* Use sqrt(a * b) over sqrt(a) * sqrt(b) */
+	PG_RETURN_FLOAT8(1 - (distance / sqrt(norma * normb)));
 }
 
 /*
@@ -586,6 +592,7 @@ vector_spherical_distance(PG_FUNCTION_ARGS)
 
 	CheckDims(a, b);
 
+	/* Auto-vectorized */
 	for (int i = 0; i < a->dim; i++)
 		distance += a->x[i] * b->x[i];
 
@@ -621,6 +628,7 @@ vector_norm(PG_FUNCTION_ARGS)
 	float	   *ax = a->x;
 	double		norm = 0.0;
 
+	/* Auto-vectorized */
 	for (int i = 0; i < a->dim; i++)
 		norm += ax[i] * ax[i];
 
@@ -645,6 +653,8 @@ vector_add(PG_FUNCTION_ARGS)
 
 	result = InitVector(a->dim);
 	rx = result->x;
+
+	/* Auto-vectorized */
 	for (int i = 0, imax = a->dim; i < imax; i++)
 		rx[i] = ax[i] + bx[i];
 
@@ -669,6 +679,8 @@ vector_sub(PG_FUNCTION_ARGS)
 
 	result = InitVector(a->dim);
 	rx = result->x;
+
+	/* Auto-vectorized */
 	for (int i = 0, imax = a->dim; i < imax; i++)
 		rx[i] = ax[i] - bx[i];
 
@@ -822,7 +834,7 @@ vector_accum(PG_FUNCTION_ARGS)
 	if (newarr)
 	{
 		for (int i = 0; i < dim; i++)
-			statedatums[i + 1] = Float8GetDatumFast(x[i]);
+			statedatums[i + 1] = Float8GetDatumFast((double) x[i]);
 	}
 	else
 	{

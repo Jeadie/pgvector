@@ -1,5 +1,5 @@
 EXTENSION = vector
-EXTVERSION = 0.4.0
+EXTVERSION = 0.4.1
 
 MODULE_big = vector
 DATA = $(wildcard sql/*--*.sql)
@@ -14,6 +14,7 @@ OPTFLAGS = -march=native
 # Mac ARM doesn't support -march=native
 ifeq ($(shell uname -s), Darwin)
 	ifeq ($(shell uname -p), arm)
+		# no difference with -march=armv8.5-a
 		OPTFLAGS =
 	endif
 endif
@@ -61,4 +62,4 @@ dist:
 .PHONY: docker
 
 docker:
-	docker build --pull --no-cache -t ankane/pgvector:latest .
+	docker build --pull --no-cache --platform linux/amd64 -t ankane/pgvector:latest .

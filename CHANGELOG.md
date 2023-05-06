@@ -1,3 +1,13 @@
+## 0.4.2 (unreleased)
+
+- Added notice when index created with little data
+- Fixed installation error with Postgres 12.0-12.2
+
+## 0.4.1 (2023-03-21)
+
+- Improved performance of cosine distance
+- Fixed index scan count
+
 ## 0.4.0 (2023-01-11)
 
 If upgrading with Postgres < 13, see [this note](https://github.com/pgvector/pgvector#040).
